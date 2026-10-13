@@ -4,6 +4,10 @@
 
 设计文档：[docs/superpowers/specs/2026-10-13-gamble-roguelike-design.md](docs/superpowers/specs/2026-10-13-gamble-roguelike-design.md)
 
+## 原型
+
+`prototype/index.html` 是一个零依赖的单文件浏览器原型，双击即可玩。包含 8 份合约、三选一拿牌、手续费、庄家对赌三种性格，以及结束时的验证数据（贪心率、爆仓次数、最大连翻、手续费总支出）。不含商店和遗物。
+
 ## 状态
 
-设计阶段。下一步是纸面原型验证，技术栈未定。
+原型验证阶段。先玩原型确认「翻倍按钮」本身上头，再定正式技术栈。

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>翻倍引擎 · 原型</title>
+<style>
+:root{--bg:#0f1115;--panel:#181c24;--text:#e8e8e8;--muted:#8a90a0;--gold:#f5c542;--red:#ff4d4d;--green:#4ade80;--accent:#7c9cff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh}
+#app{max-width:760px;margin:0 auto;padding:16px}
+header{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:var(--muted);padding-bottom:12px;border-bottom:1px solid #2a2f3a}
+header b{color:var(--text);font-size:18px;display:block}
+header .gold b{color:var(--gold)}
+.panel{background:var(--panel);border-radius:12px;padding:16px;margin-top:16px}
+.contract{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.contract div{flex:1;min-width:100px;text-align:center}
+.contract small{display:block;color:var(--muted);font-size:12px}
+.contract b{font-size:22px}
+.contract .met b{color:var(--green)}
+.stage{text-align:center;min-height:240px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px}
+.big{font-size:92px;font-weight:800;line-height:1}
+.big.pop{animation:pop .3s}
+@keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.3);color:var(--gold)}100%{transform:scale(1)}}
+.big.bust{color:var(--red);animation:shake .4s}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-12px)}40%{transform:translateX(12px)}60%{transform:translateX(-8px)}80%{transform:translateX(8px)}}
+.mult{color:var(--gold);font-size:20px;font-weight:700}
+.hint{color:var(--muted);font-size:14px}
+.peek{color:var(--accent);font-weight:700}
+.btns{display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;justify-content:center}
+button{background:#262b36;color:var(--text);border:0;border-radius:10px;padding:14px 22px;font-size:18px;cursor:pointer}
+button:disabled{opacity:.35;cursor:default}
+button.primary{background:var(--accent);color:#000;font-weight:700}
+button.danger{background:var(--red);color:#000;font-weight:700}
+button.small{padding:8px 14px;font-size:14px}
+.hand{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+.card{width:120px;min-height:150px;background:#202530;border:2px solid #3a4152;border-radius:10px;padding:10px;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:transform .1s;text-align:left}
+.card:hover{transform:translateY(-6px);border-color:var(--accent)}
+.card.off{opacity:.35;pointer-events:none}
+.card .n{font-weight:700;font-size:16px}
+.card .v{font-size:28px;font-weight:800}
+.card .d{font-size:12px;color:var(--muted);margin-top:auto;line-height:1.3}
+.card.hedge .v{color:var(--green)} .card.fn .v{color:var(--accent);font-size:18px}
+.log{color:var(--muted);font-size:13px;margin-top:10px;min-height:18px;text-align:center}
+.center{text-align:center}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+td{padding:6px 4px;border-bottom:1px solid #2a2f3a}
+td:last-child{text-align:right;font-weight:700}
+.vs{display:flex;justify-content:space-around;text-align:center;margin:12px 0}
+.vs .big{font-size:56px}
+.vs small{color:var(--muted);display:block}
+.steps{color:var(--muted);font-size:13px}
+.deckinfo{color:var(--muted);font-size:12px;text-align:center;margin-top:12px}
+h2{margin:0 0 8px;font-size:20px}
+.win{color:var(--green)} .lose{color:var(--red)}
+</style>
+</head>
+<body><div id="app"></div>
+<script>
+// ---------- 数据 ----------
+const DEFS={
+  normal:{id:'normal',name:'普通',type:'pt',base:10,prob:.5,max:5,desc:'50% 翻倍'},
+  steady:{id:'steady',name:'稳健',type:'pt',base:10,prob:.65,max:2,desc:'65% 翻倍，最多翻 2 次'},
+  heavy:{id:'heavy',name:'重注',type:'pt',base:16,prob:.4,max:5,desc:'40% 翻倍'},
+  allin:{id:'allin',name:'梭哈',type:'pt',base:8,prob:.5,max:5,minD:2,desc:'50%，不到 ×4 不能平仓'},
+  loan:{id:'loan',name:'借贷',type:'pt',base:12,prob:.5,max:5,mult:3,penalty:10,desc:'50%，每次 ×3，爆仓再扣 10 本金'},
+  margin:{id:'margin',name:'保证金',type:'hedge',hedge:15,desc:'对冲 15，合约失败时少扣 15 本金'},
+  peek:{id:'peek',name:'透视',type:'fn',desc:'下一张点数牌的第一次加仓，提前看到结果'},
+  stoploss:{id:'stoploss',name:'止损',type:'fn',desc:'本手第一次爆仓保留一半点数'},
+};
+const POOL=['normal','steady','heavy','allin','loan','margin','peek','stoploss'];
+const CONTRACTS=[60,70,80,90,105,120,140,160];
+const START=['steady','steady','steady','normal','normal','normal','normal','normal','margin','margin'];
+const PERSONA={coward:{name:'胆小鬼',desc:'翻到 ×2 必停'},chaser:{name:'追击者',desc:'一直翻到比你高为止，否则不停'},maniac:{name:'疯子',desc:'固定翻 4 次，不看你'}};
+
+let uid=0;
+const mk=id=>({...DEFS[id],uid:uid++});
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const pct=p=>Math.round(p*100)+'%';
+let S;
+
+// ---------- 一局 ----------
+function newGame(){
+  S={screen:'contract',node:0,capital:120,gold:0,deck:shuffle(START.map(mk)),discard:[],hand:[],
+    req:0,points:0,hedge:0,handNo:0,playsLeft:0,stage:null,peek:false,stoploss:false,stoplossUsed:false,
+    streak:0,bustStreak:0,log:'',settle:null,reward:null,boss:null,result:'',reason:'',
+    stats:{busts:0,maxStreak:0,maxCard:0,fees:0,doubles:0,greedyOps:0,greedyDoubles:0}};
+  startContract();
+}
+function draw(n){for(let i=0;i<n;i++){if(!S.deck.length){if(!S.discard.length)break;S.deck=shuffle(S.discard);S.discard=[]}S.hand.push(S.deck.pop())}}
+function log(m){S.log=m}
+function fee(){if(S.boss)return 3;return S.node<4?1:2}
+function freeDouble(){return S.bustStreak>=3}
+function met(){return !S.boss&&S.points+(S.stage?S.stage.value:0)>=S.req}
+function dead(){if(S.capital<=0){S.capital=0;S.screen='end';S.result='lose';S.reason='本金归零';render();return true}return false}
+
+function startContract(){S.req=CONTRACTS[S.node];S.points=0;S.hedge=0;S.handNo=0;S.peek=false;startHand()}
+function startHand(){S.handNo++;S.discard.push(...S.hand);S.hand=[];draw(5);S.playsLeft=3;S.stage=null;S.stoploss=false;S.stoplossUsed=false;S.screen='contract';log('第 '+S.handNo+' 手，打 3 张');render()}
+
+// ---------- 出牌与翻倍 ----------
+function playCard(i){
+  if(S.stage)return;
+  const c=S.hand.splice(i,1)[0];S.discard.push(c);
+  if(c.type==='hedge'){
+    if(S.boss){S.boss.playerHedge+=c.hedge;S.boss.playerVal=0;log('对冲 '+c.hedge+'，这回合不出点数');dealerPlay();return}
+    S.hedge+=c.hedge;S.playsLeft--;log('对冲 +'+c.hedge);afterPlay();return}
+  if(c.type==='fn'){
+    if(c.id==='peek')S.peek=true;if(c.id==='stoploss')S.stoploss=true;
+    log(c.id==='peek'?'透视已就绪':'止损已就绪');
+    if(!S.boss)S.playsLeft--;afterPlay();return}
+  S.stage={card:c,value:c.base,doubles:0,roll:null,busted:false,done:false,feesPaid:0,lost:0,anim:''};
+  if(S.peek){S.stage.roll=Math.random()<c.prob;S.peek=false}
+  if(met())S.stats.greedyOps++;
+  log('');render();
+}
+function doDouble(){
+  const st=S.stage,c=st.card;if(!st||st.done)return;
+  const f=freeDouble()?0:fee();
+  if(S.capital<=f&&f>0)return;
+  S.capital-=f;S.stats.fees+=f;st.feesPaid+=f;S.stats.doubles++;
+  if(met())S.stats.greedyDoubles++;
+  const ok=st.roll!==null?st.roll:Math.random()<c.prob;st.roll=null;
+  if(ok){
+    st.value*=(c.mult||2);st.doubles++;S.streak++;S.bustStreak=0;
+    S.stats.maxStreak=Math.max(S.stats.maxStreak,S.streak);st.anim='pop';
+    if(st.doubles>=c.max){st.done=true;log('翻满了')}
+    else if(met())S.stats.greedyOps++;
+  }else{
+    S.stats.busts++;S.streak=0;S.bustStreak++;
+    let kept=0;if(S.stoploss&&!S.stoplossUsed){kept=Math.floor(st.value/2);S.stoplossUsed=true}
+    st.lost=st.value-kept;st.value=kept;st.busted=true;st.done=true;st.anim='bust';
+    if(c.penalty)S.capital-=c.penalty;
+    log(kept?'止损生效，保留 '+kept:'');
+  }
+  render();
+}
+function cashOut(){const st=S.stage;if(!st)return;if(st.card.minD&&st.doubles<st.card.minD&&!st.done)return;commit()}
+function commit(){
+  const st=S.stage;S.stats.maxCard=Math.max(S.stats.maxCard,st.value);S.stage=null;
+  if(S.boss){S.boss.playerVal=st.value;dealerPlay();return}
+  S.points+=st.value;S.playsLeft--;afterPlay();
+}
+function afterPlay(){
+  if(dead())return;
+  if(S.boss){render();return}
+  if(S.playsLeft<=0){if(S.handNo<3)startHand();else settle()}else render();
+}
+
+// ---------- 结算、奖励 ----------
+function settle(){
+  S.discard.push(...S.hand);S.hand=[];
+  const ok=S.points>=S.req;let gold=0,loss=0;
+  if(ok){gold=Math.floor((S.points-S.req)*.2)}else{loss=Math.max(0,S.req-S.points-S.hedge);S.capital-=loss}
+  S.settle={ok,gold,loss,goldDoubles:0,goldBust:false};S.screen='settle';
+  if(dead())return;render();
+}
+function goldDouble(){const s=S.settle;if(s.goldDoubles>=3||s.gold<=0)return;if(Math.random()<.5){s.gold*=2;s.goldDoubles++}else{s.gold=0;s.goldBust=true;S.stats.busts++}render()}
+function takeGold(){S.gold+=S.settle.gold;S.reward=shuffle([...POOL]).slice(0,3).map(mk);S.screen='reward';render()}
+function pickReward(i){if(i>=0)S.discard.push(S.reward[i]);else if(i===-2)S.capital=Math.min(150,S.capital+30);nextNode()}
+function nextNode(){S.node++;if(S.node<CONTRACTS.length)startContract();else startBoss()}
+
+// ---------- 庄家 ----------
+function startBoss(){
+  const keys=Object.keys(PERSONA);const p=keys[Math.floor(Math.random()*keys.length)];
+  S.boss={persona:p,hp:150,round:0,dealt:0,taken:0,phase:'player',dealer:null,playerVal:null,playerHedge:0};
+  S.screen='boss';bossRound();
+}
+function bossRound(){
+  const b=S.boss;b.round++;S.discard.push(...S.hand);S.hand=[];draw(5);S.stage=null;b.phase='player';b.playerVal=null;b.playerHedge=0;b.dealer=null;S.stoploss=false;S.stoplossUsed=false;
+  log('第 '+b.round+'/5 回合，打 1 张');render();
+}
+function dealerPlay(){
+  const b=S.boss;let v=10,d=0,busted=false;const steps=[10];
+  const want=()=>b.persona==='coward'?d<1:b.persona==='maniac'?d<4:(v<=b.playerVal&&d<5);
+  while(want()){if(Math.random()<.5){v*=2;d++;steps.push(v)}else{v=0;busted=true;steps.push(0);break}}
+  b.dealer={value:v,steps,busted};
+  const pv=b.playerVal,h=b.playerHedge;let msg;
+  if(pv>v){const diff=pv-v;b.hp-=diff;b.dealt+=diff;msg='你赢了这回合，庄家 −'+diff}
+  else if(pv===v){const loss=Math.max(0,10-h);S.capital-=loss;b.taken+=loss;msg='平局，庄家赢，你 −'+loss}
+  else{const loss=Math.max(0,v-pv-h);S.capital-=loss;b.taken+=loss;msg='庄家赢了这回合，你 −'+loss}
+  b.phase='result';log(msg);
+  if(dead())return;
+  if(b.hp<=0){b.hp=0;S.screen='end';S.result='win';S.reason='庄家本金归零'}
+  else if(b.round>=5){S.screen='end';S.result=b.dealt>b.taken?'win':'lose';S.reason='5 回合结束，你造成 '+b.dealt+'，庄家造成 '+b.taken}
+  render();
+}
+
+// ---------- 渲染 ----------
+const el=document.getElementById('app');
+function cardHtml(c,i,off,onclick){
+  const v=c.type==='pt'?c.base:c.type==='hedge'?c.hedge:'功能';
+  const sub=c.type==='pt'?pct(c.prob)+(c.max<5?' · 最多 '+c.max+' 次':''):'';
+  return '<div class="card '+c.type+(off?' off':'')+'" onclick="'+onclick+'('+i+')"><div class="n">'+c.name+'</div><div class="v">'+v+'</div><div class="hint">'+sub+'</div><div class="d">'+c.desc+'</div></div>';
+}
+function header(){
+  const node=S.boss?'庄家':'合约 '+(S.node+1)+'/8';
+  const sub=S.boss?PERSONA[S.boss.persona].name:'要求 '+S.req;
+  return '<header><div>本金<b>'+S.capital+'</b></div><div class="gold">金币<b>'+S.gold+'</b></div><div>'+node+'<b>'+sub+'</b></div><div>手续费<b>'+(freeDouble()?'免':fee())+'</b></div></header>';
+}
+function stageHtml(){
+  const st=S.stage;
+  if(!st){
+    const n=S.boss?1:S.playsLeft;
+    return '<div class="stage"><div class="hint">选一张手牌打出，还能打 '+n+' 张</div>'+(S.peek?'<div class="peek">透视已就绪</div>':'')+(S.stoploss&&!S.stoplossUsed?'<div class="peek">止损已就绪</div>':'')+'</div>';
+  }
+  const c=st.card,f=freeDouble()?0:fee();
+  const mult=Math.round(st.value/c.base*100)/100;
+  const canD=!st.done&&st.doubles<c.max&&(f===0||S.capital>f);
+  const canC=!st.done&&!(c.minD&&st.doubles<c.minD);
+  let body='';
+  if(st.busted){
+    body='<div class="big bust">爆仓</div><div class="hint">错失 '+st.lost+' 点 · 手续费已付 '+st.feesPaid+(c.penalty?' · 借贷再扣 '+c.penalty:'')+'</div>'+(st.value?'<div class="mult">保留 '+st.value+'</div>':'')+'<div class="btns"><button class="primary" onclick="commit()">继续</button></div>';
+  }else{
+    const peek=st.roll!==null?'<div class="peek">透视：下一次加仓'+(st.roll?'会成功':'会失败')+'</div>':'';
+    const btns=st.done?'<button class="primary" onclick="commit()">继续</button>':
+      '<button class="danger" onclick="doDouble()"'+(canD?'':' disabled')+'>加仓 '+pct(c.prob)+(f?' · 手续费 '+f:' · 免手续费')+'</button>'+
+      '<button class="primary" onclick="cashOut()"'+(canC?'':' disabled')+'>平仓 '+st.value+'</button>';
+    body='<div class="big '+st.anim+'">'+st.value+'</div><div class="mult">×'+mult+(st.done?' 已翻满':'')+'</div>'+peek+'<div class="btns">'+btns+'</div>'+
+      (c.minD&&st.doubles<c.minD?'<div class="hint">梭哈：翻到 ×4 才能平仓</div>':'')+(!canD&&!st.done&&S.capital<=f?'<div class="hint">本金不足以付手续费</div>':'');
+  }
+  st.anim='';
+  return '<div class="stage"><div class="hint">'+c.name+' · 第 '+st.doubles+'/'+c.max+' 次翻倍</div>'+body+'</div>';
+}
+function handHtml(){
+  const off=!!S.stage||(S.boss?S.boss.phase!=='player':S.playsLeft<=0);
+  const total=S.deck.length+S.discard.length+S.hand.length+(S.stage?1:0);
+  return '<div class="hand">'+S.hand.map((c,i)=>cardHtml(c,i,off,'playCard')).join('')+'</div><div class="deckinfo">牌库 '+S.deck.length+' · 弃牌 '+S.discard.length+' · 本局总牌数 '+total+'</div>';
+}
+function render(){
+  let h=header();
+  if(S.screen==='contract'){
+    const m=S.points>=S.req;
+    h+='<div class="panel contract"><div><small>要求</small><b>'+S.req+'</b></div><div class="'+(m?'met':'')+'"><small>当前点数</small><b>'+S.points+'</b></div><div><small>手</small><b>'+S.handNo+'/3</b></div><div><small>对冲</small><b>'+S.hedge+'</b></div></div>'+
+      '<div class="panel">'+stageHtml()+'<div class="log">'+S.log+'</div></div><div class="panel">'+handHtml()+'</div>';
+  }else if(S.screen==='settle'){
+    const s=S.settle;
+    let gold='';
+    if(s.ok){
+      gold='<div style="margin-top:16px"><div class="hint">本次金币</div><div class="big '+(s.goldBust?'bust':'')+'" style="color:'+(s.goldBust?'':'var(--gold)')+'">'+(s.goldBust?'爆仓':s.gold)+'</div><div class="btns">'+
+        (s.gold>0&&s.goldDoubles<3&&!s.goldBust?'<button class="danger" onclick="goldDouble()">翻倍 50% · 免手续费 ('+s.goldDoubles+'/3)</button>':'')+
+        '<button class="primary" onclick="takeGold()">'+(s.gold>0?'收下 '+s.gold:'继续')+'</button></div></div>';
+    }else gold='<div class="btns"><button class="primary" onclick="takeGold()">继续</button></div>';
+    h+='<div class="panel center"><h2 class="'+(s.ok?'win':'lose')+'">'+(s.ok?'合约完成':'合约失败')+'</h2><div>点数 '+S.points+' / 要求 '+S.req+(s.ok?'':' · 对冲 '+S.hedge+' · 扣本金 '+s.loss)+'</div>'+gold+'</div>';
+  }else if(S.screen==='reward'){
+    h+='<div class="panel center"><h2>三选一拿牌</h2><div class="hand">'+S.reward.map((c,i)=>cardHtml(c,i,false,'pickReward')).join('')+'</div>'+
+      '<div class="btns"><button class="small" onclick="pickReward(-2)">不拿牌，恢复 30 本金</button><button class="small" onclick="pickReward(-1)">跳过</button></div></div>';
+  }else if(S.screen==='boss'){
+    const b=S.boss,p=PERSONA[b.persona];
+    h+='<div class="panel contract"><div><small>庄家本金</small><b>'+b.hp+'</b></div><div><small>回合</small><b>'+b.round+'/5</b></div><div><small>性格</small><b>'+p.name+'</b></div><div><small>规则</small><b style="font-size:14px">'+p.desc+'<br>平局庄家赢</b></div></div>';
+    if(b.phase==='player')h+='<div class="panel">'+stageHtml()+'<div class="log">'+S.log+'</div></div><div class="panel">'+handHtml()+'</div>';
+    else h+='<div class="panel"><div class="vs"><div><small>你</small><div class="big">'+b.playerVal+'</div>'+(b.playerHedge?'<small>对冲 '+b.playerHedge+'</small>':'')+'</div><div><small>庄家</small><div class="big '+(b.dealer.busted?'bust':'')+'">'+(b.dealer.busted?'爆仓':b.dealer.value)+'</div><small class="steps">'+b.dealer.steps.join(' → ')+'</small></div></div>'+
+      '<div class="log">'+S.log+'</div><div class="btns"><button class="primary" onclick="bossRound()">下一回合</button></div></div>';
+  }else if(S.screen==='end'){
+    const st=S.stats,b=S.boss;
+    const greedy=st.greedyOps?Math.round(st.greedyDoubles/st.greedyOps*100)+'%':'无';
+    h+='<div class="panel center"><h2 class="'+S.result+'">'+(S.result==='win'?'你赢了':'本局结束')+'</h2><div class="hint">'+S.reason+'</div>'+
+      '<table><tr><td>走到</td><td>'+(b?'庄家 第 '+b.round+' 回合':'合约 '+(S.node+1))+'</td></tr><tr><td>剩余本金</td><td>'+S.capital+'</td></tr><tr><td>金币</td><td>'+S.gold+'</td></tr>'+
+      '<tr><td>最高单牌点数</td><td>'+st.maxCard+'</td></tr><tr><td>最大连翻</td><td>'+st.maxStreak+'</td></tr><tr><td>爆仓次数</td><td>'+st.busts+'</td></tr><tr><td>加仓总次数</td><td>'+st.doubles+'</td></tr><tr><td>手续费总支出</td><td>'+st.fees+'</td></tr>'+
+      '<tr><td>贪心率（已达标后仍加仓）</td><td>'+greedy+'（'+st.greedyDoubles+'/'+st.greedyOps+'）</td></tr></table>'+
+      '<div class="btns"><button class="primary" onclick="newGame()">再来一局</button></div></div>';
+  }
+  el.innerHTML=h;
+}
+newGame();
+</script>
+</body></html>
